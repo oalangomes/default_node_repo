@@ -1,0 +1,21 @@
+name: 📏 Lint YAML e Markdown
+
+on:
+  pull_request:
+    paths:
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.md'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Verificar YAML com yamllint
+        uses: ibiqlik/action-yamllint@v3
+      - name: Verificar Markdown com markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v13
+        with:
+          globs: |
+            **/*.md

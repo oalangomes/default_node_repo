@@ -1,0 +1,8 @@
+# Configura opções de financiamento. Mais informações: https://docs.github.com/en/sponsors/getting-started-with-github-sponsors
+
+# Exemplo de financiamento via GitHub Sponsors
+# Altere "oalangomes" para seu nome de usuário GitHub ou remova se não utilizar.
+
+github: [oalangomes]
+# Custom links de doação (ex.: PayPal, Apoia.se)
+custom: ['https://example.com/doe-aqui']

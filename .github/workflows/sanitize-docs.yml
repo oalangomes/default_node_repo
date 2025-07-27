@@ -1,0 +1,35 @@
+name: Sanitize Markdown Docs
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**/*.md'
+
+jobs:
+  sanitize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Executar sanitização
+        run: node scripts/sanitize-docs.js
+
+      - name: Commitar mudanças (se existirem)
+        run: |
+          if [[ $(git status --porcelain) ]]; then
+            git config user.name "github-actions"
+            git config user.email "action@github.com"
+            git add docs
+            git commit -m "chore: sanitize docs filenames"
+            # O segredo está aqui!
+            git pull --rebase origin "${{ github.head_ref }}"
+            git push origin HEAD:"${{ github.head_ref }}"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

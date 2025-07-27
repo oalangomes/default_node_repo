@@ -1,0 +1,26 @@
+name: 🗃️ Variáveis Compartilhadas
+
+description: >
+  Este workflow expõe variáveis de ambiente padrão para uso em outros workflows via `workflow_call`.
+
+on:
+  workflow_call:
+    outputs:
+      node-version:
+        description: "Versão do Node a ser utilizada"
+        value: ${{ jobs.set.outputs.node-version }}
+      cache-strategy:
+        description: "Estratégia de cache para dependências"
+        value: ${{ jobs.set.outputs.cache-strategy }}
+
+jobs:
+  set:
+    runs-on: ubuntu-latest
+    outputs:
+      node-version: ${{ steps.vars.outputs.node-version }}
+      cache-strategy: ${{ steps.vars.outputs.cache-strategy }}
+    steps:
+      - id: vars
+        run: |
+          echo "node-version=20" >> $GITHUB_OUTPUT
+          echo "cache-strategy=npm" >> $GITHUB_OUTPUT

@@ -1,0 +1,206 @@
+name: 🔄 Auto PR main → master (com cobertura e changelog)
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'coverage/**'
+      - 'badges/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: auto-pr-main-to-master-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📂 Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: ⚖️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 🔧 Instala dependências
+        run: npm ci
+
+      - name: 📊 Roda testes com cobertura
+        run: npm run test:coverage
+
+      - name: 🗕️ Atualiza badge e status
+        run: npm run coverage:update
+
+      - name: 📈 Extrai cobertura
+        id: cobertura
+        run: |
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "❌ Arquivo de cobertura não encontrado!"
+            exit 1
+          fi
+
+          valor=$(jq '.total.lines.pct' coverage/coverage-summary.json)
+          echo "coverage=$valor" >> "$GITHUB_OUTPUT"
+          echo "📊 Cobertura atual: $valor%"
+
+          echo "TABLE_COVERAGE<<EOF" >> $GITHUB_ENV
+          echo '| Arquivo | % Linhas | % Branches | % Funções | % Declarações |' >> $GITHUB_ENV
+          echo '|---------|----------|------------|-----------|---------------|' >> $GITHUB_ENV
+          jq -r 'to_entries[] | select(.key != "total") | "| \(.key) | \(.value.lines.pct)% | \(.value.branches.pct)% | \(.value.functions.pct)% | \(.value.statements.pct)% |"' coverage/coverage-summary.json >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: ✅ Verifica cobertura mínima
+        run: |
+          coverage=${{ steps.cobertura.outputs.coverage }}
+          if (( $(echo "$coverage < 90" | bc -l) )); then
+            echo "❌ Cobertura insuficiente: $coverage% (mínimo: 90%)"
+            echo "🚫 PR não será criado automaticamente"
+            exit 1
+          fi
+          echo "✅ Cobertura adequada: $coverage%"
+
+      - name: 🔧 Configura git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 📝 Força criação de diferença entre branches
+        id: force_diff
+        run: |
+          # Garante que estamos na branch main
+          git checkout main
+          
+          # Commita mudanças de badges se houver
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "📝 Commitando mudanças de badges/cobertura..."
+            git add .
+            git commit -m "🦖 Atualiza badges e cobertura ($(date '+%Y-%m-%d %H:%M:%S'))"
+            git push origin main
+            echo "✅ Commit de badges enviado"
+          fi
+          
+          # Cria um arquivo temporário com timestamp para forçar diferença
+          # MUDANÇA: Movido para fora do diretório .github/workflows/
+          mkdir -p .github/sync
+          echo "# Auto-sync executado em $(date '+%Y-%m-%d %H:%M:%S')" > .github/sync/last-sync.md
+          echo "Cobertura: ${{ steps.cobertura.outputs.coverage }}%" >> .github/sync/last-sync.md
+          echo "SHA: ${{ github.sha }}" >> .github/sync/last-sync.md
+          
+          git add .github/sync/last-sync.md
+          git commit -m "🤖 Auto-sync trigger ($(date '+%Y-%m-%d %H:%M:%S'))"
+          git push origin main
+          echo "✅ Arquivo de sync criado e enviado"
+          
+          # Mostra informações das branches
+          echo "📋 Últimos commits em main:"
+          git log --oneline -3
+          
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: 🔄 Atualiza referências
+        run: |
+          git fetch origin main
+          git fetch origin master
+          
+          # Debug: mostra diferenças
+          echo "📊 Commits à frente de master:"
+          git rev-list --count origin/master..origin/main
+          
+          echo "📋 Últimos commits em main:"
+          git log --oneline origin/main -5
+          
+          echo "📋 Últimos commits em master:"
+          git log --oneline origin/master -5
+
+      - name: 🔢 Gera changelog
+        id: changelog
+        run: |
+          # Pega os commits entre master e main
+          COMMITS_AHEAD=$(git rev-list --count origin/master..origin/main)
+          echo "📊 Commits à frente: $COMMITS_AHEAD"
+          
+          if [ "$COMMITS_AHEAD" -gt 0 ]; then
+            CHANGELOG=$(git log origin/master..origin/main --pretty=format:"- %s (%h)" --no-merges | head -10)
+            NUM_COMMITS=$COMMITS_AHEAD
+          else
+            CHANGELOG="- Sincronização automática ($(date '+%Y-%m-%d %H:%M:%S'))"
+            NUM_COMMITS=1
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Atualização de configurações/infraestrutura"
+          fi
+
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "num_commits=$NUM_COMMITS" >> "$GITHUB_OUTPUT"
+          echo "commits_ahead=$COMMITS_AHEAD" >> "$GITHUB_OUTPUT"
+
+      - name: 🔗 Cria PR usando GitHub CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Primeiro, verifica se já existe um PR
+          PR_EXISTS=$(gh pr list --head auto-sync-main-master --base master --json number --jq length)
+          
+          if [ "$PR_EXISTS" -gt 0 ]; then
+            echo "📝 PR já existe, fechando e recriando..."
+            gh pr close auto-sync-main-master --delete-branch || true
+            sleep 2
+          fi
+          
+          # Cria uma nova branch para o PR
+          git checkout -b auto-sync-main-master
+          git push origin auto-sync-main-master --force
+          
+          # Cria o PR
+          gh pr create \
+            --title "🔄 Auto PR: main → master (Cobertura: ${{ steps.cobertura.outputs.coverage }}%)" \
+            --body "### 🔄 Merge automático de \`main\` para \`master\`
+
+          **📁 Cobertura Total**: \`${{ steps.cobertura.outputs.coverage }}%\` ✅
+
+          **📊 Resumo de Cobertura por Arquivo:**
+          ${{ env.TABLE_COVERAGE }}
+
+          **📋 Mudanças incluídas (${{ steps.changelog.outputs.num_commits }} commits):**
+          ${{ env.CHANGELOG }}
+
+          ---
+
+          **🤖 PR criado automaticamente**  
+          **⏰ Criado em**: $(date '+%Y-%m-%d %H:%M:%S')  
+          **🔍 Commit**: ${{ github.sha }}  
+          **📊 Commits à frente**: ${{ steps.changelog.outputs.commits_ahead }}
+
+          > Este PR será automaticamente atualizado quando novos commits forem feitos na branch \`main\`" \
+            --base master \
+            --head auto-sync-main-master \
+            --reviewer oalangomes \
+            --label "🤖 automated,📊 coverage-check,🔄 sync"
+          
+          echo "✅ PR criado com sucesso!"
+          
+          # Volta para main
+          git checkout main
+
+      - name: 📢 Resumo da execução
+        if: always()
+        run: |
+          echo "## 📊 Resumo da Execução" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cobertura**: ${{ steps.cobertura.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commits à frente**: ${{ steps.changelog.outputs.commits_ahead }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **PR Status**: Criado/atualizado via GitHub CLI" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: auto-sync-main-master → master" >> $GITHUB_STEP_SUMMARY

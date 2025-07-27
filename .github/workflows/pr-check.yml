@@ -1,0 +1,73 @@
+name: PR Check - Testes e Lint
+
+on:
+  pull_request:
+    branches: [${{ vars.TARGET_BRANCH || 'main' }}]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  check:
+    name: Testes e Lint
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      mongo:
+        image: mongo:4.4
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongo --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MONGO_URI: ${{ vars.MONGO_URI || 'mongodb://localhost:27017/project-test' }}
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Rodar Linter
+        run: npm run lint
+
+      - name: Rodar Testes com Cobertura
+        run: npm run test:coverage
+
+      - name: Upload relatório de cobertura como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Upload cobertura para Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: ${{ vars.PROJECT_NAME || 'backend-node' }}
+          fail_ci_if_error: true

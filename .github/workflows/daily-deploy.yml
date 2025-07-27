@@ -1,0 +1,7 @@
+name: Deploy Diário se houver commit novo
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+...
